@@ -14,7 +14,7 @@ fn main() {
 const LINKER_SCRIPT: &[u8] = b"OUTPUT_ARCH(riscv)
 ENTRY(_start) 
 SECTIONS {
-    . = 0x80000000;
+    . = 0x40000000;
 
     . = ALIGN(0x1000); /* Need this to create proper sections */
     sbi_start = .;

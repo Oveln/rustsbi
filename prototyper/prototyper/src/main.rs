@@ -75,6 +75,60 @@ extern "C" fn rust_main(_hart_id: usize, opaque: usize, nonstandard_a2: usize) {
             "Boot HART Privileged Version:", priv_version
         );
         info!("{:<30}: {:#08x}", "Boot HART MHPM Mask:", mhpm_mask);
+    } else if current_hartid() == 0 {
+        trap_stack::prepare_for_trap();
+
+        while !unsafe { PLATFORM.ready() } {
+            core::hint::spin_loop()
+        }
+        firmware::set_pmp(unsafe { PLATFORM.info.memory_range.as_ref().unwrap() });
+        // Detection Priv Version
+        hart_features_detection();
+
+        #[unsafe(naked)]
+        // #[link_section = ".text.hot"] // 将这个小而关键的函数放入热点段是一个好习惯
+        unsafe extern "C" fn jump_to_payload(entry: usize, hart_id: usize, opaque: usize) -> ! {
+            // 根据 RISC-V 64位 psABI 调用约定:
+            // - 第一个参数 `entry`   位于寄存器 a0
+            // - 第二个参数 `hart_id` 位于寄存器 a1
+            // - 第三个参数 `opaque`  位于寄存器 a2
+
+            // `embassy_app` 的 _start 函数期望:
+            // - a0 (argc) = hart_id
+            // - a1 (argv) = opaque
+
+            // 我们必须小心地按正确顺序操作寄存器，因为 a0 中有我们需要的入口地址
+            unsafe {
+                naked_asm!(
+                    "csrw mepc, a0", // 1. 将入口地址 (来自 a0) 设置到 mepc，这是第一步，防止 a0 被覆盖
+                    "mv   a0, a1",   // 2. 准备 payload 的第一个参数：将 a0 设置为 hart_id (来自 a1)
+                    "mv   a1, a2", // 3. prepare payload 的第二个参数：将 a1 设置为 opaque (来自 a2)
+                    "mret",        // 4. 执行跳转
+                                   // 无需 options(noreturn)，因为 naked_asm! 和 `-> !` 签名已经处理了这一点
+                )
+            }
+        }
+
+        let hart0_dest = 0xc000_0000;
+
+        info!(
+            "Hart 0: Redirecting to 0x{:0>16x} in Machine mode.",
+            hart0_dest
+        );
+
+        unsafe {
+            // 设置下一次 mret 后的权限模式为 Machine
+            use ::riscv::register::mstatus;
+            mstatus::set_mpp(mstatus::MPP::Machine);
+
+            // 调用我们定义好的裸函数来执行跳转。
+            // 编译器会根据函数签名和调用约定，自动将参数放入 a0, a1, a2。
+            jump_to_payload(
+                hart0_dest, // -> a0
+                current_hartid(),                  // -> a1
+                0x0,                               // -> a2
+            );
+        }
     } else {
         // Detection Hart feature
         hart_features_detection();

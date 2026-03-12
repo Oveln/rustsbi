@@ -1,7 +1,7 @@
 use static_toml::static_toml;
 
 /// The address where the SBI link start.
-pub const SBI_LINK_START_ADDRESS: usize = 0x80000000;
+pub const SBI_LINK_START_ADDRESS: usize = 0x40000000;
 
 static_toml! {
     const CONFIG = include_toml!("../../target/config.toml");
